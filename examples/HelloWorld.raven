@@ -1,0 +1,7 @@
+mod HelloWorld;
+
+import "std:fmt";
+
+proc : main() {
+  fmt.println("Hello World");
+}
