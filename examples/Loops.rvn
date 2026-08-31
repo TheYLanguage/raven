@@ -1,0 +1,18 @@
+pack examples;
+mod loops;
+
+import "std:fmt";
+
+proc : main() {
+    for i in 1 -> =10 {
+        fmt.println(i);
+    }
+
+    for {
+        fmt.println("Prints forever.");
+    }
+
+    if true {
+        fmt.println("This also prints forever.");
+    }
+}
