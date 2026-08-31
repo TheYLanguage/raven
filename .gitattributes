@@ -1,2 +1,2 @@
 *.raven linguist-language=Nim
-*.rvn linguist-language=Nim
+*.rvn linguist-language=Go
