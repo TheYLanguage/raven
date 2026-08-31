@@ -2,7 +2,7 @@ mod Variables;
 
 import "std:fmt";
 
-// Variables can be "early" (declared before main function)
+# Variables can be "early" (declared before main function)
 early foo := 15;
 
 proc : main() {
