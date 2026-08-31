@@ -1,0 +1,12 @@
+mod Variables;
+
+import "std:fmt";
+
+// Variables can be "early" (declared before main function)
+early foo := 15;
+
+proc : main() {
+  bar := 10;
+  foobar := foo + bar
+  fmt.println("{} + {} = {}" foo, bar, foobar);
+}
