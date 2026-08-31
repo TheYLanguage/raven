@@ -1,0 +1,8 @@
+pack examples; # change this package name.
+mod Template;
+
+import "std:fmt";
+
+proc : main() {
+  # add your own code here
+}
