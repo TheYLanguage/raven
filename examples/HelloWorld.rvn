@@ -1,8 +1,9 @@
 pack examples;
 mod HelloWorld;
 
-import "std:fmt";
+import "std/fmt.rvn";
 
 proc : main() {
-  fmt.println("Hello World");
+    fmt.println("Hello World");
+    fmt.print_int(42);
 }

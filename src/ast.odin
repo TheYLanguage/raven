@@ -12,12 +12,21 @@ AST_Node_Data :: union {
 	^Block_Node,
 	^Binary_Expr_Node,
 	^Literal_Node,
+	^For_Range_Node,
+	^For_Infinite_Node,
+	^If_Stmt_Node,
+	^Import_Node,
+}
+
+Import_Node :: struct {
+	path: string,
+	node: AST_Node,
 }
 
 Program_Node :: struct {
 	pack_name: string,
 	mod_name:  string,
-	imports:   [dynamic]string,
+	imports:   [dynamic]AST_Node,
 	decls:     [dynamic]AST_Node,
 }
 
@@ -44,4 +53,20 @@ Binary_Expr_Node :: struct {
 
 Literal_Node :: struct {
 	value: string,
+}
+
+For_Range_Node :: struct {
+	var_name: string,
+	start:    AST_Node,
+	end:      AST_Node,
+	body:     AST_Node,
+}
+
+For_Infinite_Node :: struct {
+	body: AST_Node,
+}
+
+If_Stmt_Node :: struct {
+	condition: AST_Node,
+	body:      AST_Node,
 }

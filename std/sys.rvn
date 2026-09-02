@@ -1,0 +1,14 @@
+pack std;
+mod sys;
+
+proc : write(fd: int, str_ptr: int, len: int) {
+
+}
+
+proc : exit(code: int) {
+
+}
+
+proc : read(fd: int, buf_ptr: int, count: int) {
+
+}

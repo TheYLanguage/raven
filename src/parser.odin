@@ -2,14 +2,21 @@ package raven
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 
 Parser :: struct {
-	lexer:    Lexer,
-	curr_tok: Token,
+	lexer:          Lexer,
+	curr_tok:       Token,
+	loaded_modules: ^map[string]bool,
+	base_dir:       string,
 }
 
-init_parser :: proc(source: string) -> Parser {
-	p := Parser{lexer = init_lexer(source)}
+init_parser :: proc(source: string, base_dir: string, loaded_modules: ^map[string]bool) -> Parser {
+	p := Parser{
+		lexer = init_lexer(source),
+		base_dir = base_dir,
+		loaded_modules = loaded_modules,
+	}
 	p.curr_tok = next_token(&p.lexer)
 	return p
 }
@@ -40,8 +47,7 @@ parse_expression :: proc(p: ^Parser) -> AST_Node {
 		bin_expr.left = left
 		bin_expr.right = right
 
-		node := AST_Node{derived = bin_expr, line = p.curr_tok.line}
-		return node
+		return AST_Node{derived = bin_expr, line = p.curr_tok.line}
 	}
 
 	return left
@@ -84,7 +90,56 @@ parse_primary_expression :: proc(p: ^Parser) -> AST_Node {
 	}
 }
 
+parse_for_statement :: proc(p: ^Parser) -> AST_Node {
+	expect(p, .For)
+
+	if p.curr_tok.type == .LBrace {
+		body := parse_block(p)
+		inf_node := new(For_Infinite_Node)
+		inf_node.body = body
+		return AST_Node{derived = inf_node, line = p.curr_tok.line}
+	}
+
+	var_name := p.curr_tok.text
+	expect(p, .Identifier)
+	expect(p, .In)
+
+	start_expr := parse_expression(p)
+	expect(p, .Arrow_Eq)
+	end_expr := parse_expression(p)
+
+	body := parse_block(p)
+
+	for_node := new(For_Range_Node)
+	for_node.var_name = var_name
+	for_node.start = start_expr
+	for_node.end = end_expr
+	for_node.body = body
+
+	return AST_Node{derived = for_node, line = p.curr_tok.line}
+}
+
+parse_if_statement :: proc(p: ^Parser) -> AST_Node {
+	expect(p, .If)
+	cond := parse_expression(p)
+	body := parse_block(p)
+
+	if_node := new(If_Stmt_Node)
+	if_node.condition = cond
+	if_node.body = body
+
+	return AST_Node{derived = if_node, line = p.curr_tok.line}
+}
+
 parse_statement :: proc(p: ^Parser) -> AST_Node {
+	if p.curr_tok.type == .For {
+		return parse_for_statement(p)
+	}
+
+	if p.curr_tok.type == .If {
+		return parse_if_statement(p)
+	}
+
 	if p.curr_tok.type == .Early || p.curr_tok.type == .Identifier {
 		is_early := false
 		if p.curr_tok.type == .Early {
@@ -98,7 +153,9 @@ parse_statement :: proc(p: ^Parser) -> AST_Node {
 		if p.curr_tok.type == .Colon_Assign {
 			advance(p)
 			val := parse_expression(p)
-			expect(p, .Semicolon)
+			if p.curr_tok.type == .Semicolon {
+				advance(p)
+			}
 
 			var_decl := new(Var_Decl_Node)
 			var_decl.name = name
@@ -128,6 +185,43 @@ parse_block :: proc(p: ^Parser) -> AST_Node {
 	return AST_Node{derived = block, line = p.curr_tok.line}
 }
 
+parse_import :: proc(p: ^Parser) -> (AST_Node, bool) {
+	expect(p, .Import)
+	import_path := p.curr_tok.text
+	expect(p, .String_Literal)
+	if p.curr_tok.type == .Semicolon {
+		advance(p)
+	}
+
+	full_path := filepath.join([]string{p.base_dir, import_path})
+
+	if p.loaded_modules[full_path] {
+		empty := new(Literal_Node)
+		empty.value = ""
+		return AST_Node{derived = empty, line = p.curr_tok.line}, false
+	}
+
+	p.loaded_modules[full_path] = true
+
+	source_bytes, ok := os.read_entire_file_from_filename(full_path)
+	if !ok {
+		fmt.printf("Error: Could not import file '%s'\n", full_path)
+		empty := new(Literal_Node)
+		empty.value = ""
+		return AST_Node{derived = empty, line = p.curr_tok.line}, false
+	}
+
+	sub_dir := filepath.dir(full_path)
+	sub_parser := init_parser(string(source_bytes), sub_dir, p.loaded_modules)
+	sub_ast := parse_program(&sub_parser)
+
+	imp_node := new(Import_Node)
+	imp_node.path = full_path
+	imp_node.node = sub_ast
+
+	return AST_Node{derived = imp_node, line = p.curr_tok.line}, true
+}
+
 parse_program :: proc(p: ^Parser) -> AST_Node {
 	prog := new(Program_Node)
 
@@ -146,10 +240,10 @@ parse_program :: proc(p: ^Parser) -> AST_Node {
 	}
 
 	for p.curr_tok.type == .Import {
-		advance(p)
-		append(&prog.imports, p.curr_tok.text)
-		expect(p, .String_Literal)
-		expect(p, .Semicolon)
+		imp_ast, loaded := parse_import(p)
+		if loaded {
+			append(&prog.imports, imp_ast)
+		}
 	}
 
 	for p.curr_tok.type != .EOF {

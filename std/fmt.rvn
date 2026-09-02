@@ -1,0 +1,58 @@
+pack std;
+mod fmt;
+
+import "std/sys.rvn";
+import "std/string.rvn";
+
+proc : print(text: string) {
+    early ptr := get_string_ptr(text);
+    early length := string.len(ptr);
+    sys.write(1, ptr, length);
+}
+
+proc : println(text: string) {
+    print(text);
+    sys.write(1, get_string_ptr("\n"), 1);
+}
+
+proc : print_int(val: int) {
+    if val == 0 {
+        println("0");
+        return;
+    }
+
+    early num := val;
+    early is_neg := false;
+
+    if num < 0 {
+        is_neg := true;
+        num := 0 - num;
+    }
+
+    early buffer_offset := allocate_scratch_buffer(32);
+    early cursor := 31;
+
+    for {
+        if num == 0 {
+            break;
+        }
+
+        early digit := num % 10;
+        early ascii_char := 48 + digit; // 48 is ASCII '0'
+        
+        ptr_set_byte(buffer_offset + cursor, ascii_char);
+        cursor := cursor - 1;
+        num := num / 10;
+    }
+
+    if is_neg {
+        ptr_set_byte(buffer_offset + cursor, 45); // 45 is ASCII '-'
+        cursor := cursor - 1;
+    }
+
+    early start_ptr := buffer_offset + cursor + 1;
+    early print_len := 31 - cursor;
+
+    sys.write(1, start_ptr, print_len);
+    sys.write(1, get_string_ptr("\n"), 1);
+}

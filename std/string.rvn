@@ -1,0 +1,33 @@
+pack std;
+mod string;
+
+proc : len(str_ptr: int) -> int {
+    early i := 0;
+    for {
+        early char := ptr_get_byte(str_ptr + i);
+        if char == 0 {
+            return i;
+        }
+        i := i + 1;
+    }
+    return i;
+}
+
+proc : equals(a_ptr: int, b_ptr: int) -> bool {
+    early len_a := len(a_ptr);
+    early len_b := len(b_ptr);
+
+    if len_a != len_b {
+        return false;
+    }
+
+    for i in 0 => len_a {
+        early char_a := ptr_get_byte(a_ptr + i);
+        early char_b := ptr_get_byte(b_ptr + i);
+        if char_a != char_b {
+            return false;
+        }
+    }
+
+    return true;
+}
