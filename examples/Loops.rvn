@@ -1,7 +1,7 @@
 pack examples;
 mod loops;
 
-import "std:fmt";
+import "std/fmt.rvn";
 
 proc : main() {
     for i in 1 -> =10 {

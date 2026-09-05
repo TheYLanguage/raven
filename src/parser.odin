@@ -7,6 +7,7 @@ import "core:path/filepath"
 Parser :: struct {
 	lexer:          Lexer,
 	curr_tok:       Token,
+	syntax_errors:  int,
 	loaded_modules: ^map[string]bool,
 	base_dir:       string,
 }
@@ -31,13 +32,14 @@ expect :: proc(p: ^Parser, type: Token_Type) -> bool {
 		return true
 	}
 	fmt.printf("Syntax Error on line %d: Expected %v, got %v (%s)\n", p.curr_tok.line, type, p.curr_tok.type, p.curr_tok.text)
+	p.syntax_errors += 1
 	return false
 }
 
 parse_expression :: proc(p: ^Parser) -> AST_Node {
 	left := parse_primary_expression(p)
 
-	if p.curr_tok.type == .Plus {
+	if p.curr_tok.type == .Plus || p.curr_tok.type == .Equal_Equal || p.curr_tok.type == .Not_Equal || p.curr_tok.type == .Less || p.curr_tok.type == .Greater || p.curr_tok.type == .Percent {
 		op_text := p.curr_tok.text
 		advance(p)
 		right := parse_expression(p)
@@ -56,25 +58,10 @@ parse_expression :: proc(p: ^Parser) -> AST_Node {
 parse_primary_expression :: proc(p: ^Parser) -> AST_Node {
 	tok := p.curr_tok
 
-	switch tok.type {
+	#partial switch tok.type {
 	case .Identifier:
 		advance(p)
-		if p.curr_tok.type == .Dot {
-			advance(p)
-			member := p.curr_tok.text
-			expect(p, .Identifier)
-			expect(p, .LParen)
-			
-			arg := parse_expression(p)
-			expect(p, .RParen)
-
-			lit := new(Literal_Node)
-			lit.value = fmt.tprintf("%s.%s(%v)", tok.text, member, arg)
-			return AST_Node{derived = lit, line = tok.line}
-		}
-		lit := new(Literal_Node)
-		lit.value = tok.text
-		return AST_Node{derived = lit, line = tok.line}
+		return parse_identifier_expression(p, tok)
 
 	case .Int_Literal, .String_Literal:
 		advance(p)
@@ -82,12 +69,63 @@ parse_primary_expression :: proc(p: ^Parser) -> AST_Node {
 		lit.value = tok.text
 		return AST_Node{derived = lit, line = tok.line}
 
+	case .Bang:
+		advance(p)
+		return parse_primary_expression(p)
+
 	case:
 		advance(p)
 		lit := new(Literal_Node)
 		lit.value = "invalid"
 		return AST_Node{derived = lit, line = tok.line}
 	}
+}
+
+parse_identifier_expression :: proc(p: ^Parser, tok: Token) -> AST_Node {
+	if p.curr_tok.type == .LParen {
+		expect(p, .LParen)
+		arg_text := ""
+		if p.curr_tok.type != .RParen {
+			arg := parse_expression(p)
+			#partial switch arg_node in arg.derived {
+			case ^Literal_Node:
+				arg_text = arg_node.value
+			}
+			for p.curr_tok.type == .Comma {
+				advance(p)
+				parse_expression(p)
+			}
+		}
+		expect(p, .RParen)
+		lit := new(Literal_Node)
+		lit.value = fmt.tprintf("%s(%s)", tok.text, arg_text)
+		return AST_Node{derived = lit, line = tok.line}
+	}
+	if p.curr_tok.type == .Dot {
+		advance(p)
+		member := p.curr_tok.text
+		expect(p, .Identifier)
+		expect(p, .LParen)
+
+		arg := parse_expression(p)
+		for p.curr_tok.type == .Comma {
+			advance(p)
+			parse_expression(p)
+		}
+		expect(p, .RParen)
+		arg_text := ""
+		#partial switch arg_node in arg.derived {
+		case ^Literal_Node:
+			arg_text = arg_node.value
+		}
+
+		lit := new(Literal_Node)
+		lit.value = fmt.tprintf("%s.%s(%s)", tok.text, member, arg_text)
+		return AST_Node{derived = lit, line = tok.line}
+	}
+	lit := new(Literal_Node)
+	lit.value = tok.text
+	return AST_Node{derived = lit, line = tok.line}
 }
 
 parse_for_statement :: proc(p: ^Parser) -> AST_Node {
@@ -147,7 +185,8 @@ parse_statement :: proc(p: ^Parser) -> AST_Node {
 			advance(p)
 		}
 
-		name := p.curr_tok.text
+		tok := p.curr_tok
+		name := tok.text
 		advance(p)
 
 		if p.curr_tok.type == .Colon_Assign {
@@ -162,6 +201,14 @@ parse_statement :: proc(p: ^Parser) -> AST_Node {
 			var_decl.is_early = is_early
 			var_decl.value = val
 			return AST_Node{derived = var_decl, line = p.curr_tok.line}
+		}
+
+		if !is_early {
+			expr := parse_identifier_expression(p, tok)
+			if p.curr_tok.type == .Semicolon {
+				advance(p)
+			}
+			return expr
 		}
 	}
 
@@ -193,28 +240,43 @@ parse_import :: proc(p: ^Parser) -> (AST_Node, bool) {
 		advance(p)
 	}
 
-	full_path := filepath.join([]string{p.base_dir, import_path})
+	full_path, _ := filepath.join([]string{p.base_dir, import_path})
+	if source_bytes, err := os.read_entire_file_from_path(full_path, context.temp_allocator); err == nil {
+		if p.loaded_modules[full_path] {
+			empty := new(Literal_Node)
+			empty.value = ""
+			return AST_Node{derived = empty, line = p.curr_tok.line}, false
+		}
+		p.loaded_modules[full_path] = true
+		sub_dir := filepath.dir(full_path)
+		sub_parser := init_parser(string(source_bytes), sub_dir, p.loaded_modules)
+		sub_ast := parse_program(&sub_parser)
+
+		imp_node := new(Import_Node)
+		imp_node.path = full_path
+		imp_node.node = sub_ast
+		return AST_Node{derived = imp_node, line = p.curr_tok.line}, true
+	}
+
+	full_path = import_path
+	source_bytes, err := os.read_entire_file_from_path(full_path, context.temp_allocator)
+	if err != nil {
+		fmt.printf("Error: Could not import file '%s'\n", full_path)
+		p.syntax_errors += 1
+		empty := new(Literal_Node)
+		empty.value = ""
+		return AST_Node{derived = empty, line = p.curr_tok.line}, false
+	}
 
 	if p.loaded_modules[full_path] {
 		empty := new(Literal_Node)
 		empty.value = ""
 		return AST_Node{derived = empty, line = p.curr_tok.line}, false
 	}
-
 	p.loaded_modules[full_path] = true
-
-	source_bytes, ok := os.read_entire_file_from_filename(full_path)
-	if !ok {
-		fmt.printf("Error: Could not import file '%s'\n", full_path)
-		empty := new(Literal_Node)
-		empty.value = ""
-		return AST_Node{derived = empty, line = p.curr_tok.line}, false
-	}
-
 	sub_dir := filepath.dir(full_path)
 	sub_parser := init_parser(string(source_bytes), sub_dir, p.loaded_modules)
 	sub_ast := parse_program(&sub_parser)
-
 	imp_node := new(Import_Node)
 	imp_node.path = full_path
 	imp_node.node = sub_ast
@@ -253,7 +315,13 @@ parse_program :: proc(p: ^Parser) -> AST_Node {
 			proc_name := p.curr_tok.text
 			expect(p, .Identifier)
 			expect(p, .LParen)
-			expect(p, .RParen)
+			 for p.curr_tok.type != .RParen && p.curr_tok.type != .EOF {
+				 advance(p)
+			 }
+			 expect(p, .RParen)
+			 for p.curr_tok.type != .LBrace && p.curr_tok.type != .EOF {
+				 advance(p)
+			 }
 
 			body := parse_block(p)
 

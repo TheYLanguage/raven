@@ -12,8 +12,14 @@ Codegen :: struct {
 	code:              [dynamic]u8,
 	data_sec:          [dynamic]u8,
 	string_map:        map[string]u64,
+	string_relocations: [dynamic]String_Relocation,
 	stack_offsets:     map[string]i32,
 	curr_stack_offset: i32,
+}
+
+String_Relocation :: struct {
+	code_offset: u64,
+	data_offset: u64,
 }
 
 init_codegen :: proc() -> Codegen {
@@ -21,6 +27,7 @@ init_codegen :: proc() -> Codegen {
 		code = make([dynamic]u8),
 		data_sec = make([dynamic]u8),
 		string_map = make(map[string]u64),
+		string_relocations = make([dynamic]String_Relocation),
 		stack_offsets = make(map[string]i32),
 		curr_stack_offset = -8,
 	}
@@ -96,7 +103,9 @@ compile_ast :: proc(cg: ^Codegen, node: AST_Node) {
 	#partial switch n in node.derived {
 	case ^Program_Node:
 		for decl in n.decls {
-			compile_ast(cg, decl)
+			if proc_decl, is_proc := decl.derived.(^Proc_Decl_Node); is_proc && proc_decl.name == "main" {
+				compile_ast(cg, decl)
+			}
 		}
 	case ^Proc_Decl_Node:
 		emit_prologue(cg)
@@ -227,14 +236,26 @@ compile_ast :: proc(cg: ^Codegen, node: AST_Node) {
 			// mov rax, imm32
 			emit_bytes(cg, []u8{0x48, 0xC7, 0xC0})
 			emit_u32(cg, u32(val))
-		} else if len(n.value) >= 12 && n.value[0:12] == "fmt.println(" {
-			raw_str := n.value[13:len(n.value)-2]
+		} else if len(n.value) >= len("fmt.println(") && n.value[0:len("fmt.println(")] == "fmt.println(" {
+			raw_str := n.value[len("fmt.println("):len(n.value)-1]
 			offset := add_string_literal(cg, raw_str)
 
-			code_offset := u64(ELF_HEADER_SIZE + PHDR_SIZE)
-			str_addr := BASE_ADDR + code_offset + u64(len(cg.code)) + offset
+			append(&cg.string_relocations, String_Relocation{
+				code_offset = u64(len(cg.code) + 16),
+				data_offset = offset,
+			})
+			emit_sys_write(cg, 0, u64(len(raw_str) + 1))
+		} else if len(n.value) >= len("fmt.print_int(") && n.value[0:len("fmt.print_int(")] == "fmt.print_int(" {
+			raw_num := n.value[len("fmt.print_int("):len(n.value)-1]
+			if _, ok := strconv.parse_int(raw_num, 10); ok {
+				offset := add_string_literal(cg, raw_num)
 
-			emit_sys_write(cg, str_addr, u64(len(raw_str) + 1))
+				append(&cg.string_relocations, String_Relocation{
+					code_offset = u64(len(cg.code) + 16),
+					data_offset = offset,
+				})
+				emit_sys_write(cg, 0, u64(len(raw_num) + 1))
+			}
 		} else {
 			emit_bytes(cg, []u8{0x48, 0xC7, 0xC0, 0x00, 0x00, 0x00, 0x00})
 		}
@@ -283,12 +304,24 @@ emit_elf_header :: proc(cg: ^Codegen, code_size: u64, data_size: u64) {
 write_executable :: proc(cg: ^Codegen, output_path: string) -> bool {
 	raw_code := cg.code
 	raw_data := cg.data_sec
+	data_addr := BASE_ADDR + u64(ELF_HEADER_SIZE + PHDR_SIZE) + u64(len(raw_code))
+	for relocation in cg.string_relocations {
+		address := data_addr + relocation.data_offset
+		for i in 0..<8 {
+			raw_code[relocation.code_offset + u64(i)] = u8((address >> uint(i * 8)) & 0xFF)
+		}
+	}
 	cg.code = make([dynamic]u8)
 
 	emit_elf_header(cg, u64(len(raw_code)), u64(len(raw_data)))
 	emit_bytes(cg, raw_code[:])
 	emit_bytes(cg, raw_data[:])
 
-	ok := os.write_entire_file(output_path, cg.code[:])
-	return ok
+	err := os.write_entire_file(output_path, cg.code[:])
+	if err != nil {
+		return false
+	}
+
+	permissions := os.Permissions_Read_All + os.Permissions_Execute_All + {.Write_User}
+	return os.chmod(output_path, permissions) == nil
 }

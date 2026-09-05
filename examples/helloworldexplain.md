@@ -3,7 +3,7 @@
 ```nim
 mod HelloWorld;
 
-import "std:fmt";
+import "std/fmt.rvn";
 
 proc : main() {
   fmt.println("Hello World");

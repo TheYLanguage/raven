@@ -25,6 +25,13 @@ Token_Type :: enum {
 	Assign,
 	Colon_Assign,
 	Plus,
+	Equal_Equal,
+	Not_Equal,
+	Less,
+	Greater,
+	Percent,
+	Bang,
+	Comma,
 	Arrow_Eq,
 	LBrace,
 	RBrace,
@@ -160,9 +167,31 @@ next_token :: proc(l: ^Lexer) -> Token {
 	case ';':
 		return Token{type = .Semicolon, text = ";", line = start_line}
 	case '=':
+		if peek_char(l) == '>' {
+			read_char(l)
+			return Token{type = .Arrow_Eq, text = "=>", line = start_line}
+		}
+		if peek_char(l) == '=' {
+			read_char(l)
+			return Token{type = .Equal_Equal, text = "==", line = start_line}
+		}
 		return Token{type = .Assign, text = "=", line = start_line}
 	case '+':
 		return Token{type = .Plus, text = "+", line = start_line}
+	case '!':
+		if peek_char(l) == '=' {
+			read_char(l)
+			return Token{type = .Not_Equal, text = "!=", line = start_line}
+		}
+		return Token{type = .Bang, text = "!", line = start_line}
+	case '<':
+		return Token{type = .Less, text = "<", line = start_line}
+	case '>':
+		return Token{type = .Greater, text = ">", line = start_line}
+	case '%':
+		return Token{type = .Percent, text = "%", line = start_line}
+	case ',':
+		return Token{type = .Comma, text = ",", line = start_line}
 	case '{':
 		return Token{type = .LBrace, text = "{", line = start_line}
 	case '}':

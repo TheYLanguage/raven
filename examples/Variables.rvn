@@ -1,7 +1,7 @@
 pack examples;
 mod Variables;
 
-import "std:fmt";
+import "std/fmt.rvn";
 
 # Variables can be "early" (declared before main function)
 early foo := 15;
